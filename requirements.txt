@@ -1,0 +1,22 @@
+absl-py==2.3.1
+Bottleneck @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_55txi4fy1u/croot/bottleneck_1731058642212/work
+et_xmlfile @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/et_xmlfile_1728594253367/work
+immutabledict==4.2.1
+iniconfig==2.1.0
+numexpr @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_59ckh5l11x/croot/numexpr_1752521724434/work
+numpy @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_15fk808o03/croot/numpy_and_numpy_base_1750883807193/work/dist/numpy-2.3.1-cp313-cp313-macosx_11_0_arm64.whl#sha256=5eca95f71311403d53b0c82f69c6d795543a695241dc0a0673c24cf532481fce
+openpyxl @ file:///Users/builder/cbouss/buildout/croot/openpyxl_1739486465110/work
+ortools==9.14.6206
+packaging==25.0
+pandas @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_5d428janjn/croot/pandas_1752846501836/work/dist/pandas-2.3.1-cp313-cp313-macosx_11_0_arm64.whl#sha256=27492143a4b026f0eb92fc89841272bb8c376bb46b4986baffa6d2620565b12e
+pluggy==1.6.0
+protobuf==6.31.1
+Pygments==2.19.2
+pytest==8.4.1
+python-dateutil @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/python-dateutil_1728585579455/work
+pytz @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3bjczh6it0/croot/pytz_1752135865541/work
+setuptools==72.1.0
+six @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_03myqm7p6o/croot/six_1744271511946/work
+typing_extensions==4.14.1
+tzdata @ file:///croot/python-tzdata_1746123641790/work
+wheel==0.45.1

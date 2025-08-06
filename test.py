@@ -1,27 +1,35 @@
+from openpyxl.cell.cell import MergedCell
 import subprocess
 import sys
 import pandas as pd
 from openpyxl import load_workbook
 
 TEMPLATE_PATH = "data/shift_template.xlsx"
-TEMP_SHIFT_PATH = "output/shift_final.csv"
-OUTPUT_PATH = "output/shift_output.xlsx"
+TEMP_SHIFT_PATH = "output/temp_shift.csv"
+TEMP_SHIFT_2_PATH = "output/temp_shift_2.csv"
+FINAL_SHIFT_PATH = "output/shift_final.csv"
+OUTPUT_PATH = "output/shift.xlsx"
 
-# 1. optimize_1.py を実行して temp_shift_output_1.csv を生成
-print("=== Step 1: Strict1~3の最適化 ===")
+print("=== Step 1: optimize_1.py ===")
 ret1 = subprocess.run([sys.executable, "optimize_1.py"])
 if ret1.returncode != 0:
     print("optimize_1.py の実行に失敗しました")
     sys.exit(1)
 
-# 2. optimize_2.py を実行して、temp_shift_output_1.csv を使って次の最適化
-print("=== Step 2: 追加最適化 ===")
-ret2 = subprocess.run([sys.executable, "optimize_2.py"])
+print("=== Step 2: temp_optimize.py ===")
+ret2 = subprocess.run([sys.executable, "temp_optimize.py"])
 if ret2.returncode != 0:
-    print("optimize_2.py の実行に失敗しました")
+    print("temp_optimize.py の実行に失敗しました")
     sys.exit(1)
+
+print("=== Step 3: optimize_2_1.py ===")
+ret3 = subprocess.run([sys.executable, "optimize_2_1.py"])
+if ret3.returncode != 0:
+    print("optimize_2_1.py の実行に失敗しました")
+    sys.exit(1)
+
 # CSV読込
-df = pd.read_csv(TEMP_SHIFT_PATH, index_col=0)
+df = pd.read_csv(FINAL_SHIFT_PATH, index_col=0)
 
 # Excelテンプレートをロード
 wb = load_workbook(TEMPLATE_PATH)
