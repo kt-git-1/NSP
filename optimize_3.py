@@ -15,10 +15,10 @@ from config import (
 def load_and_initialize():
     df = pd.read_csv("output/temp_shift_2.csv", index_col=0)
     fixed_mask = df.notna()
-    days = [col for col in df.columns if col.startswith('day_')]
     nurse_names = df.index.tolist()
     date_cols = df.columns.tolist()
     start_date = datetime(YEAR, MONTH - 1, 21)
+    days = [col for col in df.columns if col.startswith('day_')]
     dates = [start_date + timedelta(days=i) for i in range(DAYS_IN_MONTH)]
     weekday_list = [calendar.day_name[d.weekday()] for d in dates]
     return df, fixed_mask, date_cols, nurse_names, dates, weekday_list
@@ -51,9 +51,9 @@ def initialize_rest_score():
         score = 0
         for d in date_cols:
             shift = df.at[n, d]
-            if shift == "休":
+            if shift == '休':
                 score += 2
-            elif shift == "休/":
+            elif shift in ['休/', '/休', '/訪']:
                 score += 1
         current_rest_score[n] = score
 
@@ -65,7 +65,7 @@ def initialize_shift_counts():
     グローバル変数 shift_counts_weekday, shift_counts_saturday, nurse_names を利用。
     """
     global shift_counts_weekday, shift_counts_saturday, nurse_names
-    weekday_shifts = ["1", "2", "3", "4", "CT", "2・CT", "早", "残", "〇"]
+    weekday_shifts = ["1", "2", "3", "4", "早", "残", "〇", "CT", "2・CT"]
     saturday_shifts = ["1/", "2/", "3/", "4/", "早", "残", "〇"]
     shift_counts_weekday = {n: {s: 0 for s in weekday_shifts} for n in nurse_names}
     shift_counts_saturday = {n: {s: 0 for s in saturday_shifts} for n in nurse_names}
@@ -88,30 +88,29 @@ def assign_weekday_shift(d, col):
 
     n_to_assign = 8 if len(available_nurses) >= 8 else 7
 
-    # CT or 2・CT 割り当て（久保優先）
+    # CT or 2・CT 割り当て
     if n_to_assign == 8:
-        if not fixed_mask.at["久保", col]:
+        if not fixed_mask.at["久保", col]: # 平日 & 久保出勤 & 8人以上出勤可能
             df.at["久保", col] = "CT"
             shift_counts_weekday['久保']['CT'] += 1
             assigned_nurses.add('久保')
     else:
-        if not fixed_mask.at["久保", col]:
+        if not fixed_mask.at["久保", col]: # 平日 & 久保出勤 & 7人
             df.at["久保", col] = "2・CT"
             shift_counts_weekday['久保']['2・CT'] += 1
             assigned_nurses.add('久保')
 
-    # 外来（1〜4）
-    if n_to_assign == 8:
+    # 外来（1〜4）割り当て
+    if n_to_assign == 8: # 平日 & 8人以上出勤可能 → 外来['1', '2', '3', '4']
         gai_shift = random.sample(['1', '2', '3', '4'], k=4)
-    else:
+    else: # 平日 & 7人 → 外来['1', '3', '4']
         gai_shift = random.sample(['1', '3', '4'], k=3)
-
-    # 土曜担当外来を優先
-    土曜担当_gai = [n for n in 土曜担当 if n in available_nurses and n != '御書']
+    # 外来メイン看護師に優先して割り当て
+    gai_nurses = [n for n in ['小嶋', '久保（千）', '田浦'] if n in available_nurses]
     assigned_gai = set()
     for s in gai_shift:
-        if 土曜担当_gai:
-            count_dict = {n: shift_counts_weekday[n][s] for n in 土曜担当_gai if n not in assigned_gai}
+        if gai_nurses:
+            count_dict = {n: shift_counts_weekday[n][s] for n in gai_nurses if n not in assigned_gai}
             if count_dict:
                 min_count = min(count_dict.values())
                 candidates = [n for n, c in count_dict.items() if c == min_count]
