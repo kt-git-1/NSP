@@ -104,6 +104,15 @@ night_counts = [model.NewIntVar(base, base + (1 if i < rem else 0), f'{n}_night_
 for i, n in enumerate(YAKIN_WORKERS):
     model.Add(night_counts[i] == sum(x[n, d, '夜'] for d in range(DAYS_IN_MONTH)))
 
+# Strict3.1: 夜勤を同じ人に連続して2日おきに入れない（夜→×→夜→×の防止）
+for n in YAKIN_WORKERS:
+    for d in range(DAYS_IN_MONTH - 3):
+        # 例: day d に夜勤 → d+1に× → d+2に夜勤 → d+3に× は避けたい
+        model.AddBoolOr([
+            x[n, d, '夜'].Not(),
+            x[n, d + 2, '夜'].Not()
+        ])
+
 # Strict4: 夜勤の翌日は必ず「×」
 for n in YAKIN_WORKERS:
     for d in range(DAYS_IN_MONTH - 1):

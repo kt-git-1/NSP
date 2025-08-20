@@ -25,7 +25,7 @@ HOLIDAY_MAP = {
 
 INPUT_CSV = pd.read_csv(REQ_SHIFT_PATH)
 NURSES = [n for n in INPUT_CSV['日付'].dropna().tolist() if n != '曜日']
-HOLIDAY_NO_WORKERS = ['久保', '小嶋', '久保（千）', '田浦']
+HOLIDAY_NO_WORKERS = ['御書', '久保', '小嶋', '久保（千）', '田浦']
 HOLIDAY_WORKERS = [n for n in NURSES if n not in HOLIDAY_NO_WORKERS]
 FULL_OFF_SHIFTS = ['休']
 HALF_OFF_SHIFTS = ['休/', '/休', '1/', '2/', '3/', '4/', '/訪']
