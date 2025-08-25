@@ -5,6 +5,7 @@ import pandas as pd
 import random
 import calendar
 from datetime import datetime, timedelta
+from ortools.sat.python import cp_model
 from config import (
     YEAR, MONTH, DAYS_IN_MONTH, FULL_OFF_SHIFTS, HALF_OFF_SHIFTS, TARGET_REST_SCORE, is_japanese_holiday
 )
@@ -30,7 +31,7 @@ def load_and_initialize():
 # =============================
 def _is_empty_cell(nm, c):
     v = df.at[nm, c]
-    return (v == '' or pd.isna(v))
+    return pd.isna(v) or v == ''
 
 # =============================
 # 3. 休みスコア計算
@@ -185,49 +186,57 @@ def assign_weekday_shift(d, col):
 
 def assign_holiday_shift(d, col):
     """
-    木曜・日曜・祝日（B日程）のシフト割り当て。
-    - 「早日」「残日」を1人ずつ均等に割り当て
-    - 残りの空白には休み希望に応じて「休」または「休/」を割り当て
-    グローバル変数を活用し、d, colのみ引数で受け取る
+    木曜・日曜・祝日（B日程）のシフト割り当てを最適化して決定する。
+    OR-Tools の CP-SAT を用いて「早日」と「残日」を1人ずつ選び、
+    残りは休みシフトを割り当てる。
     """
-    global df, weekday_list, nurse_names, fixed_mask
-    weekday = weekday_list[d]
-    busy_shifts = ['休', '休/', '/休', '×', '夜', '/訪']
+    global df, nurse_names, fixed_mask
+    busy_shifts = ['休', '休/', '/休', '1/', '2/', '3/', '4/', '×', '夜', '/訪']
 
-    # 候補：勤務可能かつ未固定の看護師
+    for n in nurse_names:
+        if df.at[n, col] in ['夜', '×']:
+            df.at[n, col] = pd.NA
+            fixed_mask.at[n, col] = False
+
     candidates = [
         n for n in nurse_names
-        if df.at[n, col] not in busy_shifts and not fixed_mask.at[n, col] and n != '御書'
+        if (pd.isna(df.at[n, col]) or df.at[n, col] not in busy_shifts) and not fixed_mask.at[n, col] and n != '御書'
     ]
+    if not candidates:
+        return
 
-    # 早日割当
-    early_counts = {n: (df == '早日').loc[n].sum() for n in candidates}
-    assign_early = None
-    if early_counts:
-        min_early = min(early_counts.values())
-        early_candidates = [n for n in candidates if early_counts[n] == min_early]
-        assign_early = sorted(early_candidates)[0]
-        df.at[assign_early, col] = '早日'
-        candidates.remove(assign_early)
+    model = cp_model.CpModel()
+    early = {n: model.NewBoolVar(f'early_{n}') for n in candidates}
+    late = {n: model.NewBoolVar(f'late_{n}') for n in candidates}
 
-    # 残日割当
-    late_counts = {n: (df == '残日').loc[n].sum() for n in candidates}
-    assign_late = None
-    if late_counts:
-        min_late = min(late_counts.values())
-        late_candidates = [n for n in candidates if late_counts[n] == min_late]
-        assign_late = sorted(late_candidates)[0]
-        df.at[assign_late, col] = '残日'
-        candidates.remove(assign_late)
+    for n in candidates:
+        model.Add(early[n] + late[n] <= 1)
+    model.Add(sum(early[n] for n in candidates) == 1)
+    model.Add(sum(late[n] for n in candidates) == 1)
 
-    # 残りの候補に休み割当
-    assign_rest_shifts(candidates, col)
+    early_counts = {n: int((df == '早日').loc[n].sum()) for n in candidates}
+    late_counts = {n: int((df == '残日').loc[n].sum()) for n in candidates}
+    model.Minimize(sum((early_counts[n] + late_counts[n]) * (early[n] + late[n]) for n in candidates))
 
-    # まだ空欄の人（全看護師から）の補填
+    solver = cp_model.CpSolver()
+    status = solver.Solve(model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise RuntimeError(f"No feasible assignment for {col}")
+
+    rest_candidates = []
+    for n in candidates:
+        if solver.BooleanValue(early[n]):
+            df.at[n, col] = '早日'
+        elif solver.BooleanValue(late[n]):
+            df.at[n, col] = '残日'
+        else:
+            rest_candidates.append(n)
+
+    assign_rest_shifts(rest_candidates, col)
+
     remain_nurses = [
         n for n in nurse_names
-        if _is_empty_cell(n, col)
-        and not fixed_mask.at[n, col]
+        if _is_empty_cell(n, col) and not fixed_mask.at[n, col]
     ]
     assign_rest_shifts(remain_nurses, col)
 
@@ -360,7 +369,7 @@ def assign_rest_shifts(nurses, col):
 
     def _is_empty(nm, c):
         v = df.at[nm, c]
-        return (v == '' or pd.isna(v))
+        return pd.isna(v) or v == ''
 
     # 1. 対象者の休み不足スコアを計算（2点制: 休=2, 休/=1）
     need = {}
@@ -420,6 +429,8 @@ def balance_rest_days():
         t = 0
         for d in date_cols:
             s = df.at[n, d]
+            if pd.isna(s):
+                continue
             if s in FULL_OFF_SHIFTS:
                 t += 1
             elif s in HALF_OFF_SHIFTS:
@@ -869,6 +880,7 @@ def main():
     initialize_shift_counts()
     土曜担当 = ["小嶋", "田浦", "久保（千）"]
     assign_all_shifts()
+    df.fillna('', inplace=True)
     balance_rest_days()
     prevent_seven_day_streaks()
     prevent_four_day_rest_streaks()
