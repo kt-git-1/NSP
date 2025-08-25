@@ -5,6 +5,7 @@ import pandas as pd
 import random
 import calendar
 from datetime import datetime, timedelta
+from ortools.sat.python import cp_model
 from config import (
     YEAR, MONTH, DAYS_IN_MONTH, FULL_OFF_SHIFTS, HALF_OFF_SHIFTS, TARGET_REST_SCORE, is_japanese_holiday
 )
@@ -770,7 +771,136 @@ def prevent_four_day_rest_streaks():
 # 6. シフト割り当てメインループ
 # =============================
 def assign_all_shifts():
+    """全日程のシフトを最適化して割り当てる。
+    まず休み（OFF）配置を CP-SAT で最適化し、
+    - balance_rest_days: 休日日数差を2日以内にする
+    - prevent_seven_day_streaks: 7連勤を防止
+    - prevent_four_day_rest_streaks: 4連休を防止
+    - ensure_min_rest_days_balanced: 各看護師が TARGET_REST_SCORE 以上の休みを取得
+    を満たすよう制約を設定する。その後、残りの勤務日に既存ロジックで
+    平日・土曜・休日のシフトを割り振る。解が得られない場合は従来ロジックに
+    フォールバックする。
+    """
+
     global df, date_cols, weekday_list, dates, fixed_mask, nurse_names
+
+    model = cp_model.CpModel()
+    work = {}
+
+    # 0/1 変数の定義（1: 勤務, 0: 休み）
+    for n in nurse_names:
+        for d, col in enumerate(date_cols):
+            if fixed_mask.at[n, col]:
+                shift = df.at[n, col]
+                work[n, d] = 0 if shift in (FULL_OFF_SHIFTS + HALF_OFF_SHIFTS) else 1
+            else:
+                work[n, d] = model.NewBoolVar(f'work_{n}_{d}')
+
+    # 日別の必要勤務人数を満たす制約
+    for d, col in enumerate(date_cols):
+        kind = _day_kind(d)
+        if kind == 'holiday':
+            req = 2
+        elif kind == 'saturday':
+            req = 7
+        else:  # weekday
+            req = 7
+
+        fixed_work = sum(
+            w for n in nurse_names for w in [work[n, d]] if isinstance(w, int)
+        )
+        vars_to_sum = [work[n, d] for n in nurse_names if not isinstance(work[n, d], int)]
+        if vars_to_sum:
+            model.Add(sum(vars_to_sum) + fixed_work >= req)
+        else:
+            # 全て固定値の場合、既存データで人数を満たしているかチェック
+            if fixed_work < req:
+                print(f"⚠️ Day {col} の固定勤務者が不足しています")
+
+    # 各看護師の休日日数を算出し、最低休日日数とバランス制約
+    rest_totals = {}
+    for n in nurse_names:
+        terms = []
+        const = 0
+        for d in range(len(date_cols)):
+            w = work[n, d]
+            if isinstance(w, int):
+                const += 1 - w
+            else:
+                terms.append(1 - w)
+        rest_totals[n] = model.NewIntVar(0, DAYS_IN_MONTH, f'rest_total_{n}')
+        if terms:
+            model.Add(rest_totals[n] == sum(terms) + const)
+        else:
+            model.Add(rest_totals[n] == const)
+        model.Add(rest_totals[n] >= TARGET_REST_SCORE)
+
+    max_rest = model.NewIntVar(0, DAYS_IN_MONTH, 'max_rest')
+    min_rest = model.NewIntVar(0, DAYS_IN_MONTH, 'min_rest')
+    model.AddMaxEquality(max_rest, list(rest_totals.values()))
+    model.AddMinEquality(min_rest, list(rest_totals.values()))
+    model.Add(max_rest - min_rest <= 2)
+
+    # 連勤・連休の制約
+    for n in nurse_names:
+        for start in range(len(date_cols) - 6):
+            terms = []
+            const = 0
+            for d in range(start, start + 7):
+                w = work[n, d]
+                if isinstance(w, int):
+                    const += w
+                else:
+                    terms.append(w)
+            if terms:
+                model.Add(sum(terms) + const <= 6)
+            else:
+                model.Add(const <= 6)
+
+        for start in range(len(date_cols) - 3):
+            terms = []
+            const = 0
+            for d in range(start, start + 4):
+                w = work[n, d]
+                if isinstance(w, int):
+                    const += 1 - w
+                else:
+                    terms.append(1 - w)
+            if terms:
+                model.Add(sum(terms) + const <= 3)
+            else:
+                model.Add(const <= 3)
+
+    # 休日日数のばらつきを最小化
+    model.Minimize(max_rest - min_rest)
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 30
+    status = solver.Solve(model)
+
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        print('❌ 最適化で解が見つかりませんでした。従来ロジックを使用します。')
+        for d, col in enumerate(date_cols):
+            weekday = weekday_list[d]
+            if weekday in ['Monday', 'Tuesday', 'Wednesday', 'Friday'] and not is_japanese_holiday(dates[d]):
+                assign_weekday_shift(d, col)
+            elif weekday in ['Thursday', 'Sunday'] or is_japanese_holiday(dates[d]):
+                assign_holiday_shift(d, col)
+            elif weekday == 'Saturday':
+                assign_saturday_shift(d, col)
+            else:
+                assign_fallback_rest(d, col)
+        return
+
+    # 解を反映して休みを設定
+    for n in nurse_names:
+        for d, col in enumerate(date_cols):
+            w = work[n, d]
+            val = w if isinstance(w, int) else solver.Value(w)
+            if val == 0 and not fixed_mask.at[n, col]:
+                df.at[n, col] = '休'
+
+    # 休み以外の勤務シフトを割り当て
     for d, col in enumerate(date_cols):
         weekday = weekday_list[d]
         if weekday in ['Monday', 'Tuesday', 'Wednesday', 'Friday'] and not is_japanese_holiday(dates[d]):
@@ -869,10 +999,6 @@ def main():
     initialize_shift_counts()
     土曜担当 = ["小嶋", "田浦", "久保（千）"]
     assign_all_shifts()
-    balance_rest_days()
-    prevent_seven_day_streaks()
-    prevent_four_day_rest_streaks()
-    ensure_min_rest_days_balanced()
     export_outputs(df, date_cols, nurse_names)
 
 if __name__ == "__main__":
